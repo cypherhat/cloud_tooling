@@ -65,7 +65,9 @@ show_help()
   echo ""
   echo "  Exit status:"
   echo "     0        if OK,"
-  echo "     1        aws credentials file not found,"
+  echo "     5        aws credentials file not found,"
+  echo "     6        hashicorp terroform not found,"
+  echo "     7        ssh-keygen not found,"
   echo ""
   echo "AUTHOR"
   echo "    ckell <sunckell at that google mail site>"
@@ -86,11 +88,28 @@ show_help()
 # --- check around to make sure we can do what we want to do.
 environment_checks()
 {
+  # --- check that aws is set up
   aws_credentials="~/.aws/credentials"
   if [ ! -f ${aws_credentials} ]; then
     logger "ERROR: aws credentials file not found."
     logger "INFO:  install awscli and run aws configure"
-    exit 1
+    exit 5
+  fi
+
+  # --- terraform?
+  terraform_condition=$(which terraform > /dev/null 2>&1)
+  if [ $terraform_condition -ne 0 ];
+    logger "ERROR: terraform not found."
+    logger "INFO:  install terraform to continue."
+    exit 6
+  fi
+
+  # --- ssh?
+  ssh_condition=$(which ssh-keygen > /dev/null 2>&1)
+  if [ $ssh_condition -ne 0 ]; then
+    logger "ERROR: ssh-keygen is not installed"
+    logger "INFO:  install ssh to continue"
+    exit 7
   fi
 
 }
