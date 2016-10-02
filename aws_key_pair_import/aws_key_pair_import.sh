@@ -9,8 +9,17 @@
 # --- TODO:
 # ---
 
+# --- global variables
 SCRIPT=`basename $0`
 VERSION="0.0.1"
+HOSTNAME=`hostname`
+
+# --- a simple logger to stdout
+logger()
+{
+  mesg=$1
+  echo "[`date`] - ${HOSTNAME} - ${SCRIPT} - ${mesg}"
+}
 
 # --- what did we get passed.
 parse_cmd_line()
@@ -48,7 +57,7 @@ show_help()
   echo "  ${SCRIPT} [OPTION]"
   echo ""
   echo "DESCRIPTION"
-  echo "  Create and import a valid key pair to AWS."
+  echo "  Create and import a valid key pair to AWS using Hashicorp's terraform."
   echo ""
   echo "  Mandatory arguments for long options are mandatory for short options."
   echo "  --help, -h"
@@ -56,9 +65,9 @@ show_help()
   echo ""
   echo "  Exit status:"
   echo "     0        if OK,"
-  echo "     1"
+  echo "     1        aws credentials file not found,"
   echo ""
-  echo "AUTHO"
+  echo "AUTHOR"
   echo "    ckell <sunckell at that google mail site>"
   echo ""
   echo "REPORTING BUGS"
@@ -74,10 +83,23 @@ show_help()
   echo ""
 }
 
+# --- check around to make sure we can do what we want to do.
+environment_checks()
+{
+  aws_credentials="~/.aws/credentials"
+  if [ ! -f ${aws_credentials} ]; then
+    logger "ERROR: aws credentials file not found."
+    logger "INFO:  install awscli and run aws configure"
+    exit 1
+  fi
+
+}
+
 # --- a sane place to kick off the actions
 main()
 {
   parse_cmd_line "$@"
+  environment_checks
 }
 
 # --- do it!
