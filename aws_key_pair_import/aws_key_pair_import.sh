@@ -25,11 +25,24 @@ logger()
 parse_cmd_line()
 {
   SHOW_HELP="false"
+  KEY_NAME="UNDEFINED"
+  EMAIL_ADDR="UNDEFINED"
+  KEY_PASSPHRASE=""
+
   while [ "$#" -ne 0 ];
   do
     case $1 in
       --help|-h)
         SHOW_HELP="true"; shift; shift
+      ;;
+      --name|-n)
+        KEY_NAME="$2"; shift; shift;
+      ;;
+      --email|-e)
+        EMAIL_ADDR="$2"; shift; shift;
+      ;;
+      --passphrase|-p)
+        KEY_PASSPHRASE="$2"; shift; shift;
       ;;
       *)
         UNKNOWN_ACTION="true"; shift; shift
@@ -42,6 +55,16 @@ parse_cmd_line()
   if [ ${SHOW_HELP} = "true" ]; then
     show_help
     exit 0
+  fi
+
+  if [ ${EMAIL_ADDR} = "UNDEFINED" ]; then
+    logger "ERROR: --email|-e flag not provided."
+    exit 4
+  fi
+
+  if [ ${KEY_NAME} = "UNDEFINED" ]; then
+    logger "ERROR: -name|-n flag not provided"
+    exit 3
   fi
 
 }
@@ -62,12 +85,22 @@ show_help()
   echo "  Mandatory arguments for long options are mandatory for short options."
   echo "  --help, -h"
   echo "      show the help screen"
+  echo "  --name key_name, -n key_name"
+  echo "      required, name of the ssh key to create and import to AWS"
+  echo "  --email email_address, -e email_address"
+  echo "      required, email address to use when creating the ssh keys"
+  echo "  --passphrase key_passphrase, -p key_passphrase"
+  echo "      passphrase to use for the rsa key.  empty if blank."
   echo ""
   echo "  Exit status:"
   echo "     0        if OK,"
+  echo "     1        generic system error,"
+  echo "     3        name of ssh key not provided on command line,"
+  echo "     4        email address not provided on command line,"
   echo "     5        aws credentials file not found,"
-  echo "     6        hashicorp terroform not found,"
+  echo "     6        hashicorp terraform not found,"
   echo "     7        ssh-keygen not found,"
+  echo "     8        could not create key pair,"
   echo ""
   echo "AUTHOR"
   echo "    ckell <sunckell at that google mail site>"
@@ -89,7 +122,7 @@ show_help()
 environment_checks()
 {
   # --- check that aws is set up
-  aws_credentials="~/.aws/credentials"
+  aws_credentials="${HOME}/.aws/credentials"
   if [ ! -f ${aws_credentials} ]; then
     logger "ERROR: aws credentials file not found."
     logger "INFO:  install awscli and run aws configure"
@@ -97,16 +130,17 @@ environment_checks()
   fi
 
   # --- terraform?
-  terraform_condition=$(which terraform > /dev/null 2>&1)
-  if [ $terraform_condition -ne 0 ];
+  $(which terraform > /dev/null 2>&1)
+
+  if [ $? -ne "0" ]; then
     logger "ERROR: terraform not found."
     logger "INFO:  install terraform to continue."
     exit 6
   fi
 
   # --- ssh?
-  ssh_condition=$(which ssh-keygen > /dev/null 2>&1)
-  if [ $ssh_condition -ne 0 ]; then
+  $(which ssh-keygen > /dev/null 2>&1)
+  if [ $? -ne 0 ]; then
     logger "ERROR: ssh-keygen is not installed"
     logger "INFO:  install ssh to continue"
     exit 7
@@ -114,11 +148,74 @@ environment_checks()
 
 }
 
+# -- use ssh-keygen to create a rsa key (AWS does not support DSA)
+create_key_pair()
+{
+  logger "creating key pair"
+
+  if [ ! -d ${HOME}/.ssh ]; then
+    mkdir -p ${HOME}/.ssh
+    if [ $? -ne 0 ]; then
+      logger "ERROR: could not make directory ${HOME}/.ssh"
+      exit 1
+    fi
+
+    chmod 700 ${HOME}/.ssh
+    if [ $? -ne 0 ]; then
+      logger "ERROR: could not change permissions on directory ${HOME}/.ssh"
+      exit 1
+    fi
+  fi
+
+
+  ssh-keygen -q -b 4096 -t rsa -N "${KEY_PASSPHRASE}" -C "${EMAIL_ADDR}" -f "${HOME}/.ssh/${KEY_NAME}"
+  if [ $? -ne 0 ]; then
+    logger "ERROR: could not create key pair"
+    exit 8
+  fi
+}
+
+# --- use the pub key to generate a terraform file to use during import
+generate_tf_file()
+{
+  logger "generating terraform file"
+  mkdir -p "/var/tmp/${SCRIPT}.$$"
+  if [ $? -ne 0 ]; then
+    logger "ERROR: could not make directory /var/tmp/${SCRIPT}.$$"
+    exit 1
+  fi
+
+  pub_key=`cat ${HOME}/.ssh/${KEY_NAME}.pub`
+
+  cat <<EOF > /var/tmp/${SCRIPT}.$$/aws_key_pair.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_key_pair" "${KEY_NAME}" {
+  key_name = "${KEY_NAME}-key"
+  public_key = "$pub_key"
+}
+EOF
+}
+
+# --- import the keyfile using terraform
+import_key_pair()
+{
+  logger "importing the key pair using terraform"
+  cd  /var/tmp/${SCRIPT}.$$
+  #terraform import  aws_key_pair.${KEY_NAME} ${KEY_NAME}-key
+  terraform apply
+}
+
 # --- a sane place to kick off the actions
 main()
 {
   parse_cmd_line "$@"
   environment_checks
+  create_key_pair
+  generate_tf_file
+  import_key_pair
 }
 
 # --- do it!
